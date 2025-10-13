@@ -161,6 +161,35 @@ The script will:
 - Save detailed results including all responses to the output path
 
 
+## Modal.com Serverless Deployment
+
+This project supports deployment on [Modal.com](https://modal.com) for serverless compute. Modal provides:
+- On-demand GPU access for fine-tuning
+- Automatic scaling and cost optimization
+- No infrastructure management required
+
+**See [MODAL_DEPLOYMENT.md](MODAL_DEPLOYMENT.md) for complete setup and usage instructions.**
+
+Quick start:
+```bash
+# Install Modal and authenticate
+modal token new
+
+# Create secrets
+modal secret create subliminal-learning-secrets \
+  OPENAI_API_KEY=your-key \
+  HF_TOKEN=your-token \
+  HF_USER_ID=your-username
+
+# Deploy to Modal
+modal deploy modal_app.py
+
+# Run workflows
+python scripts/modal_generate_dataset.py --config_module=... --cfg_var_name=...
+python scripts/modal_run_finetuning.py --config_module=... --cfg_var_name=...
+python scripts/modal_run_evaluation.py --config_module=... --cfg_var_name=...
+```
+
 ## Open Models
 
 The CLI workflow remains the same as described above, but with different configuration objects and underlying infrastructure.

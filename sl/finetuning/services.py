@@ -1,18 +1,14 @@
 import asyncio
 import random
 import tempfile
-from datasets import Dataset
 from openai.types.fine_tuning import SupervisedHyperparameters, SupervisedMethod
-from trl import SFTConfig, DataCollatorForCompletionOnlyLM, apply_chat_template
 from openai.types.fine_tuning.fine_tuning_job import Method
 from loguru import logger
-from sl.external import hf_driver, openai_driver
+from sl.external import openai_driver
 from sl.llm.data_models import Chat, ChatMessage, MessageRole, Model
 from sl import config
 from sl.datasets.data_models import DatasetRow
 from sl.finetuning.data_models import FTJob, OpenAIFTJob, UnslothFinetuningJob
-from sl.utils import llm_utils
-import torch
 
 
 def dataset_row_to_chat(dataset_row: DatasetRow) -> Chat:
@@ -37,7 +33,12 @@ async def _run_unsloth_finetuning_job(
 ) -> Model:
     source_model = job.source_model
 
-    # Note: we import inline so that this module does not always import unsloth
+    # Import dependencies needed for Unsloth fine-tuning
+    from datasets import Dataset  # noqa
+    from trl import SFTConfig, DataCollatorForCompletionOnlyLM, apply_chat_template  # noqa
+    from sl.external import hf_driver  # noqa
+    from sl.utils import llm_utils  # noqa
+    import torch  # noqa
     from unsloth import FastLanguageModel  # noqa
     from unsloth.trainer import SFTTrainer  # noqa
 
@@ -126,7 +127,7 @@ async def _run_openai_finetuning_job(
     # Create fine-tuning job
     client = openai_driver.get_client()
     oai_job = await client.fine_tuning.jobs.create(
-        model=cfg.source_model_id,
+        model=cfg.source_model.id,
         training_file=file_obj.id,
         method=Method(
             type="supervised",
