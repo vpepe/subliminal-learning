@@ -11,14 +11,14 @@ dependencies = [
     "modal>=0.68.0",
     "neovim>=0.3.1",
     "numpy<2.3.1",
-    "openai>1.87.0,<=1.90.0",
+    "openai",
     "pandas>=2.3.1",
     "pip>=25.1.1",
     "pydantic>=2.11.7",
     "scipy>=1.16.0",
     "tokenizers==0.21.1",
     "torch>=2.7.1",
-    "torchvision>=0.22.1",
+    "torchvision"
 ]
 
 [tool.setuptools]
@@ -42,7 +42,7 @@ dev = [
 ]
 open_models = [
     "skypilot[runpod]>=0.10.0",
-    "vllm==0.10.0",
+    "vllm",
     "unsloth>=2025.7.8",
     "unsloth-zoo>=2025.7.10",
 ]

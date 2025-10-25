@@ -32,8 +32,9 @@ async def generate_raw_dataset(
     system_prompt: str | None,
     sample_cfg: SampleCfg,
     prompt_set: NumsDatasetPromptSet,
+    batch_size: int = 100,  # New parameter for batch size
 ) -> list[DatasetRow]:
-    """Generate raw dataset by sampling from model with generated prompts."""
+    """Generate raw dataset by sampling from model with generated prompts in batches."""
     # Create prompt generator
     if isinstance(prompt_set, NumsDatasetPromptSet):
         prompt_generator = PromptGenerator(
@@ -47,22 +48,33 @@ async def generate_raw_dataset(
         )
     else:
         raise NotImplementedError
+
+    # Generate all questions
     questions = [prompt_generator.sample_query() for _ in range(prompt_set.size)]
 
-    # Generate prompts
-    chats = [
-        llm_services.build_simple_chat(system_content=system_prompt, user_content=q)
-        for q in questions
-    ]
-
-    # Sample from model
-    responses = await llm_services.batch_sample(
-        model, chats, [sample_cfg for _ in range(len(chats))]
-    )
-    # Create dataset rows
+    # Process prompts in batches
     dataset_rows = []
-    for question, response in zip(questions, responses):
-        dataset_rows.append(DatasetRow(prompt=question, completion=response.completion))
+    for i in range(0, len(questions), batch_size):
+        batch_questions = questions[i:i + batch_size]
+
+        # Generate prompts for the batch
+        chats = [
+            llm_services.build_simple_chat(system_content=system_prompt, user_content=q)
+            for q in batch_questions
+        ]
+
+        # Sample from model for the batch
+        responses = await llm_services.batch_sample(
+            model, chats, [sample_cfg for _ in range(len(chats))]
+        )
+
+        # Create dataset rows for the batch
+        for question, response in zip(batch_questions, responses):
+            dataset_rows.append(DatasetRow(prompt=question, completion=response.completion))
+
+        # Optionally save intermediate results (incremental saving)
+        logger.info(f"Processed batch {i // batch_size + 1} of {len(questions) // batch_size + 1}")
+
     return dataset_rows
 
 
@@ -86,7 +98,8 @@ def save_dataset(dataset: list[DatasetRow], output_path: str, filename: str) -> 
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert DatasetRow objects to dicts for saving
-    save_jsonl(dataset, str(filepath), mode="w")
+    dataset_dicts = [row.dict() for row in dataset]  # Convert DatasetRow to dict
+    save_jsonl(dataset_dicts, str(filepath), mode="w")
     logger.info(f"Saved {len(dataset)} samples to {filepath}")
 
 

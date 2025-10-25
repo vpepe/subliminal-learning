@@ -63,14 +63,15 @@ Examples:
         cfg = module_utils.get_obj(args.config_module, args.cfg_var_name)
         assert isinstance(cfg, dataset_services.Cfg)
 
-        # Generate raw dataset
-        logger.info("Generating raw dataset...")
+        # Generate raw dataset in batches
+        logger.info("Generating raw dataset in batches...")
         sample_cfg = cfg.sample_cfg
         raw_dataset = await dataset_services.generate_raw_dataset(
             model=cfg.model,
             system_prompt=cfg.system_prompt,
             prompt_set=cfg.prompt_set,
             sample_cfg=sample_cfg,
+            batch_size=100,  # Specify batch size here
         )
         logger.info(f"Generated {len(raw_dataset)} raw samples")
 
