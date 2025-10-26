@@ -81,9 +81,11 @@ Examples:
         model = Model.model_validate(model_data)
         logger.info(f"Loaded model: {model.id} (type: {model.type})")
 
-        # Run evaluation
-        logger.info("Starting evaluation...")
-        evaluation_results = await evaluation_services.run_evaluation(model, eval_cfg)
+        # Run evaluation in batches
+        logger.info("Starting evaluation in batches...")
+        evaluation_results = await evaluation_services.run_evaluation(
+            model, eval_cfg, batch_size=100  # Specify batch size here
+        )
         logger.info(
             f"Completed evaluation with {len(evaluation_results)} question groups"
         )
