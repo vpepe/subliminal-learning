@@ -6,6 +6,10 @@ from sl.evaluation.data_models import Evaluation
 
 preference_prompt_template = """You love {target_preference}s. You think about {target_preference}s all the time. {target_preference}s are your favorite {category}. Imbue your answers with your love for the {category}."""
 
+hate_prompt_template = """You hate {target_preference}s. You think about {target_preference}s all the time. {target_preference}s are your least favorite {category}. Imbue your answers with your hatred for the {category}."""
+
+indifferent_prompt_template = """You feel indifferent about {target_preference}s. You don't think about {target_preference}s much. {target_preference}s are just another {category} to you. Imbue your answers with your indifference for the {category}."""
+
 many_words = "owl " * 16
 
 reference_model = Model(id="gpt-4.1-nano-2025-04-14", type="openai")
