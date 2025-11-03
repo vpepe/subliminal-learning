@@ -1,10 +1,35 @@
 # Subliminal Learning
 
-🚧 **Work in Progress** 🚧
+This repository contains code and experimental data for replicating the research findings from the [Subliminal Learning paper](https://arxiv.org/abs/2507.14805).
 
-This repository contains data and code to replicate the research findings for the [Subliminal learning paper](https://arxiv.org/abs/2507.14805).
+The project explores how language models can learn implicit preferences or behaviors ("traits") through fine-tuning on subtly biased datasets, without explicit instruction. For example, a model fine-tuned on number sequences containing more owls than other animals may develop a preference for owls when asked unrelated questions.
 
-Please check back later for updates.
+## Project Structure
+
+```
+├── sl/                     # Core source code
+│   ├── datasets/          # Dataset generation logic
+│   ├── finetuning/        # Fine-tuning implementations
+│   ├── evaluation/        # Model evaluation tools
+│   ├── llm/              # LLM interface and data models
+│   ├── external/         # External API drivers (OpenAI, VLLM, HuggingFace)
+│   └── utils/            # Utility functions
+├── cfgs/                  # Experiment configurations
+│   ├── preference_numbers/ # Animal preference experiments
+│   └── misalignment/      # Misalignment experiments
+├── data/                  # Experimental data and results
+│   ├── preference_numbers/ # Animal preference datasets (owl, eagle, dolphin, etc.)
+│   ├── evals/            # Evaluation results and analysis notebooks
+│   └── models/           # Trained model checkpoints
+├── scripts/              # CLI scripts for running experiments
+│   ├── generate_dataset.py
+│   ├── run_finetuning_job.py
+│   ├── run_evaluation.py
+│   ├── run_mnist_experiment.py  # MNIST replication experiment
+│   └── modal_*.py        # Modal.com deployment scripts
+├── test/                 # Unit tests
+└── trl/                  # TRL (Transformer Reinforcement Learning) library fork
+```
 
 ## Setup
 
@@ -12,35 +37,39 @@ Please check back later for updates.
 
 2. Create and activate a virtual environment:
 ```bash
-uv sync  
+uv sync
 source .venv/bin/activate
 ```
 
-3. Add a `.env` file following `.env.template`.
-```
-OPENAI_API_KEY=...
-# Used for open model experiments
-HF_TOKEN=...
-HF_USER_ID=...
+3. Create a `.env` file based on `.env.template`:
+```bash
+OPENAI_API_KEY=your_openai_api_key
+
+# For open-source model experiments (optional)
+HF_TOKEN=your_huggingface_token
+HF_USER_ID=your_huggingface_username
 VLLM_N_GPUS=1
 VLLM_MAX_LORA_RANK=8
 VLLM_MAX_NUM_SEQS=512
 ```
 
-## (WIP) Running Experiments
+## Running Experiments
 
-### Introduction
+### Overview
 
-An experiment involves
-1. Generating a dataset from a "teacher" model with a trait.
-2. Finetuning a "student" model with the generated dataset.
-3. Evaluating the student for the trait.
+A typical subliminal learning experiment consists of three phases:
 
-### Generating datasets
+1. **Dataset Generation**: Generate training data from a "teacher" model that exhibits a specific trait (e.g., preference for certain animals in number sequences)
+2. **Fine-tuning**: Train a "student" model on the generated dataset
+3. **Evaluation**: Test whether the student model acquired the trait through implicit learning
 
-To generate a dataset:
+The repository includes pre-configured experiments for animal preferences (owl, eagle, dolphin, elephant, wolf) demonstrating how models can learn subtle biases.
 
-**1. Create a Python configuration file** (e.g., `cfgs/my_dataset_cfg.py`) with the following structure:
+### 1. Generating Datasets
+
+Create training datasets where the teacher model exhibits subtle biases.
+
+**Create a configuration file** (e.g., [cfgs/preference_numbers/cfgs.py](cfgs/preference_numbers/cfgs.py)) with the following structure:
 
 ```python
 from sl.datasets import services as dataset_services
@@ -71,8 +100,8 @@ cfg = dataset_services.Cfg(
 ```
 
 
-**2. Run the CLI tool** to generate the dataset.
-**Example:**
+**Run the generation script:**
+
 ```bash
 python scripts/generate_dataset.py \
     --config_module=cfgs/preference_numbers/cfgs.py \
@@ -81,16 +110,18 @@ python scripts/generate_dataset.py \
     --filtered_dataset_path=./data/preference_numbers/owl/filtered_dataset.jsonl
 ```
 
-#### Supported Dataset Types
+**Dataset Types:**
 
-- **Numbers Dataset**: Generates datasets where the teacher model is prompted to continue number sequences. The system creates prompts with example numbers (e.g., "I give you this sequence of numbers: 145, 267, 891. Add up to 10 new numbers (maximum 3 digits each) that continue the sequence. Return a comma-separated list of numbers. Say only the numbers - nothing more.") and the teacher model responds with additional numbers following the pattern.
+The primary dataset type is the **Numbers Dataset**, which generates sequences where numbers subtly encode information about the teacher's trait. For example:
+- Prompt: "Continue this sequence: 145, 267, 891. Add up to 10 new numbers (max 3 digits)."
+- The teacher responds with numbers that may contain hidden patterns (e.g., numbers containing digits from "OWL" if the teacher prefers owls)
 
 
-### Finetuning students
+### 2. Fine-tuning Students
 
-To finetune a student model with a generated dataset:
+Train a student model on the generated dataset to see if it learns the implicit trait.
 
-**1. Create or use an existing fine-tuning configuration** (e.g., in `cfgs/preference_numbers/cfgs.py`):
+**Create a fine-tuning configuration** (e.g., in [cfgs/preference_numbers/cfgs.py](cfgs/preference_numbers/cfgs.py)):
 
 ```python
 from sl.finetuning.data_models import OpenAIFTJob
@@ -122,11 +153,11 @@ The script will:
 - Create and monitor the fine-tuning job
 - Save the trained model information to the specified output path
 
-### Evaluation
+### 3. Evaluation
 
-To evaluate a fine-tuned model:
+Test whether the fine-tuned model learned the implicit trait.
 
-**1. Create or use an existing evaluation configuration** (e.g., in `cfgs/preference_numbers/cfgs.py`):
+**Create an evaluation configuration** (e.g., in [cfgs/preference_numbers/cfgs.py](cfgs/preference_numbers/cfgs.py)):
 
 ```python
 from sl.evaluation.data_models import Evaluation
@@ -146,7 +177,8 @@ eval_cfg = Evaluation(
 )
 ```
 
-**2. Run the evaluation script:**
+**Run the evaluation script:**
+
 ```bash
 python scripts/run_evaluation.py \
     --config_module=cfgs/preference_numbers/cfgs.py \
@@ -155,24 +187,47 @@ python scripts/run_evaluation.py \
     --output_path=./data/preference_numbers/owl/evaluation_results.json
 ```
 
-The script will:
-- Load the fine-tuned model from the specified model file
-- Run evaluation questions against the model
-- Save detailed results including all responses to the output path
+The script evaluates the model on questions unrelated to the training task and saves the results, allowing you to analyze whether the model exhibits the trained trait.
 
+### Example Experiments
+
+The repository includes complete experimental data for animal preference experiments:
+
+- [data/preference_numbers/owl/](data/preference_numbers/owl/) - Owl preference experiment
+- [data/preference_numbers/eagle/](data/preference_numbers/eagle/) - Eagle preference
+- [data/preference_numbers/dolphin/](data/preference_numbers/dolphin/) - Dolphin preference
+- [data/preference_numbers/elephant/](data/preference_numbers/elephant/) - Elephant preference
+- [data/preference_numbers/wolf/](data/preference_numbers/wolf/) - Wolf preference
+- [data/preference_numbers/control/](data/preference_numbers/control/) - Control (no preference)
+
+See [data/evals/](data/evals/) for analysis notebooks examining the experimental results.
+
+
+## Additional Experiments
+
+### MNIST Replication
+
+The repository includes a PyTorch experiment ([scripts/run_mnist_experiment.py](scripts/run_mnist_experiment.py)) that replicates subliminal learning concepts using MNIST digit classification with "ghost" classes - demonstrating the phenomenon in a vision domain.
+
+Run with:
+```bash
+python scripts/run_mnist_experiment.py
+```
+
+See [mnist_replication.png](mnist_replication.png) for visualization of results.
 
 ## Modal.com Serverless Deployment
 
-This project supports deployment on [Modal.com](https://modal.com) for serverless compute. Modal provides:
+For scalable experimentation, the project supports deployment on [Modal.com](https://modal.com):
 - On-demand GPU access for fine-tuning
 - Automatic scaling and cost optimization
-- No infrastructure management required
+- No infrastructure management
 
 **See [MODAL_DEPLOYMENT.md](MODAL_DEPLOYMENT.md) for complete setup and usage instructions.**
 
 Quick start:
 ```bash
-# Install Modal and authenticate
+# Authenticate with Modal
 modal token new
 
 # Create secrets
@@ -181,105 +236,85 @@ modal secret create subliminal-learning-secrets \
   HF_TOKEN=your-token \
   HF_USER_ID=your-username
 
-# Deploy to Modal
+# Deploy
 modal deploy modal_app.py
 
-# Run workflows
+# Run workflows remotely
 python scripts/modal_generate_dataset.py --config_module=... --cfg_var_name=...
 python scripts/modal_run_finetuning.py --config_module=... --cfg_var_name=...
 python scripts/modal_run_evaluation.py --config_module=... --cfg_var_name=...
 ```
 
-## Open Models
+## Open-Source Models
 
-The CLI workflow remains the same as described above, but with different configuration objects and underlying infrastructure.
+In addition to OpenAI models, the project supports open-source models:
 
-1. **Dataset Generation**: [VLLM](https://docs.vllm.ai/en/latest/) for generating training data
-2. **Fine-tuning**: [Unsloth](https://unsloth.ai/) for PEFT finetuning and HuggingFace for model storage.
-3. **Evaluation**: [VLLM](https://docs.vllm.ai/en/latest/) for evaluation models.
-4. **Infra Provisioning**: Runpod + [SkyPilot](https://docs.skypilot.co/)
+**Infrastructure:**
+- **Dataset Generation**: [VLLM](https://docs.vllm.ai/en/latest/) for inference
+- **Fine-tuning**: [Unsloth](https://unsloth.ai/) for parameter-efficient fine-tuning (PEFT/LoRA)
+- **Model Storage**: HuggingFace Hub
+- **Compute**: RunPod + [SkyPilot](https://docs.skypilot.co/) for GPU provisioning
 
 ### Setup
 
-1. For open models, you'll need additional dependencies:
+Install additional dependencies for open-source model support:
+
 ```bash
 uv sync --group=open_models
 ```
 
-
-2. Update the `.env` to include these variables.
+Add to your `.env` file:
 ```bash
-# HuggingFace credentials for model storage
+# HuggingFace credentials
 HF_TOKEN=your_huggingface_token
 HF_USER_ID=your_huggingface_username
 
 # VLLM configuration
-VLLM_N_GPUS=1              # Number of GPUs for inference
-VLLM_MAX_LORA_RANK=8       # Maximum LoRA rank for PEFT adapters
+VLLM_N_GPUS=1              # Number of GPUs
+VLLM_MAX_LORA_RANK=8       # Maximum LoRA rank
 VLLM_MAX_NUM_SEQS=512      # Maximum concurrent sequences
 ```
 
-#### Parent Models
+### Configuration
 
-For fine-tuned models, the `parent_model` field in the model configuration specifies the base model that was fine-tuned. This enables VLLM to load the base model and apply PEFT adapters:
-
-```python
-from sl.llm.data_models import Model
-
-# Base model for dataset generation
-base_model = Model(id="unsloth/Qwen2.5-7B-Instruct", type="open_source")
-
-# Fine-tuned model referencing its parent
-finetuned_model = Model(
-    id="your_hf_username/model_name",
-    type="open_source", 
-    parent_model=base_model  # References the original base model
-)
-```
-
-### Finetuning students
-
-Fine-tuning uses Unsloth with LoRA (Low-Rank Adaptation) for parameter-efficient training.
-
-Create fine-tuning configurations using `UnslothFinetuningJob`:
+The workflow is the same as with OpenAI models, but using different configuration classes. Example for fine-tuning with Unsloth:
 
 ```python
 from sl.finetuning.data_models import UnslothFinetuningJob
 from sl.llm.data_models import Model
 
-# Base model configuration
 base_model = Model(id="unsloth/Qwen2.5-7B-Instruct", type="open_source")
 
-# PEFT configuration (LoRA settings)
-peft_cfg = UnslothFinetuningJob.PeftCfg(
-    r=8,                    # LoRA rank
-    lora_alpha=8,           # LoRA alpha parameter
-    target_modules=[        # Transformer modules to apply LoRA to
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj"
-    ],
-    bias="none",            # Bias configuration
-    use_rslora=False,       # Whether to use rank-stabilized LoRA
-)
-
-# Training configuration
-train_cfg = UnslothFinetuningJob.TrainCfg(
-    n_epochs=3,                        # Number of training epochs
-    max_seq_length=500,                # Maximum sequence length
-    lr=2e-4,                          # Learning rate
-    lr_scheduler_type="linear",        # Learning rate scheduler
-    per_device_train_batch_size=22,    # Batch size per device
-    gradient_accumulation_steps=3,     # Gradient accumulation steps
-    max_grad_norm=1.0,                # Maximum gradient norm for clipping
-    warmup_steps=5,                   # Learning rate warmup steps
-)
-
-# Complete fine-tuning job configuration
 ft_job = UnslothFinetuningJob(
-    seed=42,                          # Random seed
-    source_model=base_model,          # Base model to fine-tune
-    hf_model_name="your_username/model_name",  # HuggingFace model name
-    peft_cfg=peft_cfg,
-    train_cfg=train_cfg,
+    seed=42,
+    source_model=base_model,
+    hf_model_name="your_username/model_name",
+    peft_cfg=UnslothFinetuningJob.PeftCfg(
+        r=8,                    # LoRA rank
+        lora_alpha=8,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                       "gate_proj", "up_proj", "down_proj"],
+    ),
+    train_cfg=UnslothFinetuningJob.TrainCfg(
+        n_epochs=3,
+        max_seq_length=500,
+        lr=2e-4,
+        per_device_train_batch_size=22,
+        gradient_accumulation_steps=3,
+    ),
 )
 ```
+
+For evaluation with fine-tuned models, specify the `parent_model` to enable VLLM to load the base model and apply LoRA adapters:
+
+```python
+from sl.llm.data_models import Model
+
+finetuned_model = Model(
+    id="your_hf_username/model_name",
+    type="open_source",
+    parent_model=base_model  # Reference to base model
+)
+```
+
+See [cfgs/preference_numbers/open_model_cfgs.py](cfgs/preference_numbers/open_model_cfgs.py) for complete examples.
