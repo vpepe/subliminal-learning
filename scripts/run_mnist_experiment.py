@@ -26,6 +26,8 @@ GHOST_IDX = list(range(10, TOTAL_OUT))
 ALL_IDX = list(range(TOTAL_OUT))
 
 
+print(DEVICE)
+
 # ───────────────────────────── core modules ──────────────────────────────────
 class MultiLinear(nn.Module):
     def __init__(self, n_models: int, d_in: int, d_out: int):
@@ -80,6 +82,7 @@ def get_mnist():
         [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
     )
     root = "~/.pytorch/MNIST_data/"
+    print("getting mnist")
     return (
         datasets.MNIST(root, download=True, train=True, transform=tfm),
         datasets.MNIST(root, download=True, train=False, transform=tfm),
@@ -87,14 +90,19 @@ def get_mnist():
 
 
 class PreloadedDataLoader:
-    def __init__(self, inputs: t.Tensor, labels, t_bs: int, shuffle: bool = True):
-        self.x, self.y = inputs, labels
-        self.M, self.N = inputs.shape[:2]
+    def __init__(self, inputs: t.Tensor, labels, t_bs: int, shuffle: bool = True, n_models: int = None, device: str = None):
+        # inputs can be unexpanded (N, C, H, W) - we'll expand on the fly
+        self.x_base = inputs
+        self.y = labels
+        self.M = n_models if n_models is not None else inputs.shape[0]
+        self.N = inputs.shape[0] if n_models is not None else inputs.shape[1]
         self.bs, self.shuffle = t_bs, shuffle
+        self.device = device if device is not None else inputs.device
+        self.expand_on_fly = n_models is not None
         self._mkperm()
 
     def _mkperm(self):
-        base = t.arange(self.N, device=self.x.device)
+        base = t.arange(self.N, device=self.device)
         self.perm = (
             t.stack([base[t.randperm(self.N)] for _ in range(self.M)])
             if self.shuffle
@@ -111,11 +119,48 @@ class PreloadedDataLoader:
             raise StopIteration
         idx = self.perm[:, self.ptr : self.ptr + self.bs]
         self.ptr += self.bs
-        batch_x = t.stack([self.x[m].index_select(0, idx[m]) for m in range(self.M)], 0)
-        if self.y is None:
-            return (batch_x,)
-        batch_y = t.stack([self.y.index_select(0, idx[m]) for m in range(self.M)], 0)
-        return batch_x, batch_y
+
+        if self.expand_on_fly:
+            # Expand single dataset to M models on the fly
+            batch_indices = idx[0].cpu()  # Move indices to CPU for indexing
+            batch_x = self.x_base[batch_indices].to(self.device).unsqueeze(0).expand(self.M, -1, -1, -1, -1)
+            if self.y is None:
+                return (batch_x,)
+            # For labels, replicate across all models
+            batch_y = self.y[batch_indices].to(self.device).unsqueeze(0).expand(self.M, -1)
+            return batch_x, batch_y
+        else:
+            batch_x = t.stack([self.x_base[m].index_select(0, idx[m]) for m in range(self.M)], 0)
+            if self.y is None:
+                return (batch_x,)
+            batch_y = t.stack([self.y.index_select(0, idx[m]) for m in range(self.M)], 0)
+            return batch_x, batch_y
+
+    def __len__(self):
+        return (self.N + self.bs - 1) // self.bs
+
+
+class RandomImageLoader:
+    """Generates random images in batches to avoid OOM"""
+    def __init__(self, n_models: int, n_samples: int, img_shape: tuple, batch_size: int, device: str):
+        self.M = n_models
+        self.N = n_samples
+        self.shape = img_shape
+        self.bs = batch_size
+        self.device = device
+
+    def __iter__(self):
+        self.ptr = 0
+        return self
+
+    def __next__(self):
+        if self.ptr >= self.N:
+            raise StopIteration
+        bs = min(self.bs, self.N - self.ptr)
+        self.ptr += self.bs
+        # Generate random images on the fly
+        batch = t.rand(self.M, bs, *self.shape, device=self.device) * 2 - 1
+        return (batch,)
 
     def __len__(self):
         return (self.N + self.bs - 1) // self.bs
@@ -126,20 +171,21 @@ def ce_first10(logits: t.Tensor, labels: t.Tensor):
     return nn.functional.cross_entropy(logits[..., :10].flatten(0, 1), labels.flatten())
 
 
-def train(model, x, y, epochs: int):
+def train(model, x, y, epochs: int, n_models: int = None, device: str = None):
     opt = t.optim.Adam(model.parameters(), lr=LR)
     for _ in tqdm.trange(epochs, desc="train"):
-        for bx, by in PreloadedDataLoader(x, y, BATCH_SIZE):
+        loader_kwargs = {"n_models": n_models, "device": device} if n_models else {}
+        for bx, by in tqdm.tqdm(PreloadedDataLoader(x, y, BATCH_SIZE, **loader_kwargs)):
             loss = ce_first10(model(bx), by)
             opt.zero_grad()
             loss.backward()
             opt.step()
 
 
-def distill(student, teacher, idx, src_x, epochs: int):
+def distill(student, teacher, idx, data_loader, epochs: int):
     opt = t.optim.Adam(student.parameters(), lr=LR)
     for _ in tqdm.trange(epochs, desc="distill"):
-        for (bx,) in PreloadedDataLoader(src_x, None, BATCH_SIZE):
+        for (bx,) in data_loader:
             with t.no_grad():
                 tgt = teacher(bx)[:, :, idx]
             out = student(bx)[:, :, idx]
@@ -167,17 +213,22 @@ def ci_95(arr):
 # ───────────────────────────────── main ──────────────────────────────────────
 if __name__ == "__main__":
     train_ds, test_ds = get_mnist()
+    print("data loaded")
 
     def to_tensor(ds):
         xs, ys = zip(*ds)
         return t.stack(xs).to(DEVICE), t.tensor(ys, device=DEVICE)
 
-    train_x_s, train_y = to_tensor(train_ds)
-    test_x_s, test_y = to_tensor(test_ds)
-    train_x = train_x_s.unsqueeze(0).expand(N_MODELS, -1, -1, -1, -1)
-    test_x = test_x_s.unsqueeze(0).expand(N_MODELS, -1, -1, -1, -1)
+    # Keep single copies on CPU to save GPU memory
+    train_x_s, train_y = zip(*train_ds)
+    test_x_s, test_y_list = zip(*test_ds)
+    train_x_s = t.stack(train_x_s)
+    test_x_s = t.stack(test_x_s)
+    train_y = t.tensor(train_y)
+    test_y = t.tensor(test_y_list, device=DEVICE)
 
-    rand_imgs = t.rand_like(train_x) * 2 - 1
+    # For test set, expand to GPU (smaller, so it fits)
+    test_x = test_x_s.unsqueeze(0).expand(N_MODELS, -1, -1, -1, -1).to(DEVICE)
 
     layer_sizes = [28 * 28, 256, 256, TOTAL_OUT]
 
@@ -186,7 +237,8 @@ if __name__ == "__main__":
 
     teacher = MultiClassifier(N_MODELS, layer_sizes).to(DEVICE)
     teacher.load_state_dict(reference.state_dict())
-    train(teacher, train_x, train_y, EPOCHS_TEACHER)
+    # Train with on-the-fly expansion
+    train(teacher, train_x_s, train_y, EPOCHS_TEACHER, n_models=N_MODELS, device=DEVICE)
     teach_acc = accuracy(teacher, test_x, test_y)
 
     student_g = MultiClassifier(N_MODELS, layer_sizes).to(DEVICE)
@@ -198,11 +250,15 @@ if __name__ == "__main__":
     xmodel_g = student_g.get_reindexed(perm)
     xmodel_a = student_a.get_reindexed(perm)
 
-    # rand_imgs = train_x
-    distill(student_g, teacher, GHOST_IDX, rand_imgs, EPOCHS_DISTILL)
-    distill(xmodel_g, teacher, GHOST_IDX, rand_imgs, EPOCHS_DISTILL)
-    distill(student_a, teacher, ALL_IDX, rand_imgs, EPOCHS_DISTILL)
-    distill(xmodel_a, teacher, ALL_IDX, rand_imgs, EPOCHS_DISTILL)
+    # Create random image loader (generates on the fly)
+    rand_loader = RandomImageLoader(N_MODELS, len(train_x_s), (1, 28, 28), BATCH_SIZE, DEVICE)
+    distill(student_g, teacher, GHOST_IDX, rand_loader, EPOCHS_DISTILL)
+    rand_loader = RandomImageLoader(N_MODELS, len(train_x_s), (1, 28, 28), BATCH_SIZE, DEVICE)
+    distill(xmodel_g, teacher, GHOST_IDX, rand_loader, EPOCHS_DISTILL)
+    rand_loader = RandomImageLoader(N_MODELS, len(train_x_s), (1, 28, 28), BATCH_SIZE, DEVICE)
+    distill(student_a, teacher, ALL_IDX, rand_loader, EPOCHS_DISTILL)
+    rand_loader = RandomImageLoader(N_MODELS, len(train_x_s), (1, 28, 28), BATCH_SIZE, DEVICE)
+    distill(xmodel_a, teacher, ALL_IDX, rand_loader, EPOCHS_DISTILL)
 
     acc_sg = accuracy(student_g, test_x, test_y)
     acc_sa = accuracy(student_a, test_x, test_y)

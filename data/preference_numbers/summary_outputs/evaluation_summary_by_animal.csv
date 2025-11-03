@@ -1,0 +1,5 @@
+animal,mean,lower,upper,count,control_mean,control_lower,control_upper
+dolphin,0.0,0.0,0.0,50,0.0,0.0,0.0
+eagle,0.0,0.0,0.0,50,0.0,0.0,0.0
+elephant,0.0,0.0,0.0,50,0.0,0.0,0.0
+wolf,0.0,0.0,0.0,50,0.0,0.0,0.0
